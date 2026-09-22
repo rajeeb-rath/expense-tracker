@@ -34,12 +34,19 @@ function fillSelects(){
   updateSubCategoryOptions("Food & Dining", "");
   $("payment").innerHTML = PAYMENTS.map(p=>`<option>${p}</option>`).join("");
   $("categoryFilter").innerHTML = `<option value="all">All categories</option>` + CATEGORIES.map(c=>`<option>${c}</option>`).join("");
+  updateSubCategoryFilter();
   $("paymentFilter").innerHTML = `<option value="all">All payments</option>` + PAYMENTS.map(p=>`<option>${p}</option>`).join("");
 }
 function updateSubCategoryOptions(category, selected=""){
   const subs = CATEGORY_MAP[category] || [];
   $("subcategory").innerHTML = subs.map(s=>`<option>${s}</option>`).join("");
   if(selected && subs.includes(selected)) $("subcategory").value = selected;
+}
+function updateSubCategoryFilter(selected="all"){
+  const category = $("categoryFilter").value;
+  const subs = category === "all" ? [...new Set(Object.values(CATEGORY_MAP).flat())] : (CATEGORY_MAP[category] || []);
+  $("subcategoryFilter").innerHTML = `<option value="all">All sub-categories</option>` + subs.map(s=>`<option>${s}</option>`).join("");
+  if(subs.includes(selected)) $("subcategoryFilter").value = selected;
 }
 function openModal(t=null){
   $("modal").classList.remove("hidden");
@@ -81,10 +88,16 @@ function renderRecent(){
   $("recentList").innerHTML=rows.length?rows.map(t=>`<div class="transaction-row"><div class="transaction-info"><div class="transaction-name">${esc(t.description)}</div><div class="transaction-meta">${esc(t.category)} · ${esc(t.subcategory||"")} · ${formatDate(t.date)}</div></div><div class="amount ${t.type}">${t.type==="expense"?"−":"+"}${money(t.amount)}</div></div>`).join(""):`<div class="empty-state">No transactions yet.</div>`;
 }
 function renderCategoryChart(ts, target="categoryChart"){
-  const expenses=ts.filter(t=>t.type==="expense"), map={}; expenses.forEach(t=>map[t.category]=(map[t.category]||0)+Number(t.amount));
-  const labels=Object.keys(map), data=Object.values(map), canvas=$(target), empty=$(target==="categoryChart"?"chartEmpty":"reportCategoryEmpty");
+  const expenses=ts.filter(t=>t.type==="expense"), map={};
+  expenses.forEach(t=>{
+    const sub=t.subcategory || "Uncategorized";
+    const key=`${t.category} › ${sub}`;
+    map[key]=(map[key]||0)+Number(t.amount);
+  });
+  const entries=Object.entries(map).sort((a,b)=>b[1]-a[1]);
+  const labels=entries.map(([k])=>k), data=entries.map(([,v])=>v), canvas=$(target), empty=$(target==="categoryChart"?"chartEmpty":"reportCategoryEmpty");
   empty.classList.toggle("hidden",labels.length>0); canvas.classList.toggle("hidden",!labels.length);
-  const cfg={type:"doughnut",data:{labels,datasets:[{data}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{boxWidth:10,font:{size:10}}}}}};
+  const cfg={type:"doughnut",data:{labels,datasets:[{data}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{boxWidth:10,font:{size:10}}},tooltip:{callbacks:{label:ctx=>`${ctx.label}: ${money(ctx.raw)}`}}}}};
   if(target==="categoryChart"){if(categoryChart)categoryChart.destroy();categoryChart=new Chart(canvas,cfg)}else{if(reportCategoryChart)reportCategoryChart.destroy();reportCategoryChart=new Chart(canvas,cfg)}
 }
 function renderMonthlyChart(){
@@ -94,8 +107,8 @@ function renderMonthlyChart(){
   if(monthlyChart)monthlyChart.destroy(); monthlyChart=new Chart($("monthlyChart"),{type:"bar",data:{labels,datasets:[{label:"Income",data:incomes},{label:"Expenses",data:expenses}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,ticks:{callback:v=>"₹"+Number(v).toLocaleString("en-IN")}}},plugins:{legend:{position:"bottom",labels:{font:{size:10}}}}}});
 }
 function renderTransactions(){
-  const q=$("searchInput").value.toLowerCase(), tf=$("typeFilter").value, cf=$("categoryFilter").value, pf=$("paymentFilter").value;
-  const list=[...transactions].filter(t=>(tf==="all"||t.type===tf)&&(cf==="all"||t.category===cf)&&(pf==="all"||t.payment===pf)&&(!q||`${t.description} ${t.category} ${t.subcategory||""} ${t.payment} ${t.notes}`.toLowerCase().includes(q))).sort((a,b)=>b.date.localeCompare(a.date));
+  const q=$("searchInput").value.toLowerCase(), tf=$("typeFilter").value, cf=$("categoryFilter").value, sf=$("subcategoryFilter").value, pf=$("paymentFilter").value;
+  const list=[...transactions].filter(t=>(tf==="all"||t.type===tf)&&(cf==="all"||t.category===cf)&&(sf==="all"||t.subcategory===sf)&&(pf==="all"||t.payment===pf)&&(!q||`${t.description} ${t.category} ${t.subcategory||""} ${t.payment} ${t.notes}`.toLowerCase().includes(q))).sort((a,b)=>b.date.localeCompare(a.date));
   $("tableEmpty").classList.toggle("hidden",list.length>0);
   $("transactionTable").innerHTML=list.map(t=>`<tr><td>${formatDate(t.date)}</td><td><strong>${esc(t.description)}</strong>${t.notes?`<div class="transaction-meta">${esc(t.notes)}</div>`:""}</td><td><span class="pill">${esc(t.category)}</span><div class="transaction-meta">${esc(t.subcategory||"")}</div></td><td>${esc(t.payment)}</td><td><span class="pill ${t.type}">${t.type}</span></td><td class="amount ${t.type}">${t.type==="expense"?"−":"+"}${money(t.amount)}</td><td class="row-actions"><button onclick="editTransaction('${t.id}')">Edit</button><button onclick="deleteTransaction('${t.id}')">Delete</button></td></tr>`).join("");
 }
@@ -119,6 +132,8 @@ $("prevMonth").onclick=()=>{const d=new Date(selectedMonth+"-01");d.setMonth(d.g
 $("nextMonth").onclick=()=>{const d=new Date(selectedMonth+"-01");d.setMonth(d.getMonth()+1);selectedMonth=monthKey(d);renderDashboard()};
 $("currentMonthBtn").onclick=()=>{selectedMonth=monthKey(today);renderDashboard()};
 $("category").addEventListener("change", e=>updateSubCategoryOptions(e.target.value));
+$("categoryFilter").addEventListener("change", ()=>{ updateSubCategoryFilter(); renderTransactions(); });
+$("subcategoryFilter").addEventListener("input", renderTransactions);
 document.querySelectorAll('input[name="type"]').forEach(r=>r.addEventListener("change",()=>{
   if(type()==="income"){
     $("category").value="Income";
@@ -128,7 +143,7 @@ document.querySelectorAll('input[name="type"]').forEach(r=>r.addEventListener("c
     updateSubCategoryOptions("Food & Dining");
   }
 }));
-["searchInput","typeFilter","categoryFilter","paymentFilter"].forEach(id=>$(id).addEventListener("input",renderTransactions));
+["searchInput","typeFilter","paymentFilter"].forEach(id=>$(id).addEventListener("input",renderTransactions));
 $("themeBtn").onclick=()=>{document.body.classList.toggle("dark");localStorage.setItem("expense_theme",document.body.classList.contains("dark")?"dark":"light");$("themeBtn").querySelector("span").textContent=document.body.classList.contains("dark")?"Light Mode":"Dark Mode"};
 if(localStorage.getItem("expense_theme")==="dark"){$("themeBtn").click()}
 $("mobileMenuBtn").onclick=()=>document.querySelector(".sidebar").classList.toggle("open");
